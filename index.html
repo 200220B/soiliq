@@ -143,9 +143,265 @@
 <body>
   <div id="root"></div>
 
-  <script type="text/babel" src="config/supabase.js"></script>
-  <script type="text/babel" src="frontend/auth.js"></script>
-  <script type="text/babel" src="frontend/dashboard.js"></script>
-  <script type="text/babel" src="app.js"></script>
+  <script type="text/babel">
+    const SUPABASE_URL = 'https://ndewduxuougsmbqmjscz.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5kZXdkdXh1b3Vnc21icW1qc2N6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzczODI4NjEsImV4cCI6MjA5Mjk1ODg2MX0.3uG3lG4aY6aiijIbLaAVUyvJHirKnt00FRtgRu4IDA8';
+    window.supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    const { useState, useEffect, useRef } = React;
+
+    function Auth({ onLogin }) {
+      const [email, setEmail] = useState('');
+      const [password, setPassword] = useState('');
+      const [isLogin, setIsLogin] = useState(true);
+      const [loading, setLoading] = useState(false);
+      const [message, setMessage] = useState('');
+
+      const handleAuth = async (e) => {
+        e.preventDefault();
+        setLoading(true);
+        setMessage('');
+
+        try {
+          if (isLogin) {
+            const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
+            if (error) throw error;
+            onLogin(data.session);
+          } else {
+            const { data, error } = await window.supabaseClient.auth.signUp({ email, password });
+            if (error) throw error;
+            setMessage('Registration successful! You can log in when you approve your email.');
+            setIsLogin(true);
+          }
+        } catch (error) {
+          setMessage(error.error_description || error.message);
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      return (
+        <div className="flex justify-center items-center h-screen bg-gray-50">
+          <div className="card w-96 max-w-full">
+            <h2 className="text-3xl font-bold mb-6 text-center text-[var(--green)]" style={{fontFamily: "'DM Serif Display', serif"}}>
+              {isLogin ? 'Login to SoilIQ' : 'Create an Account'}
+            </h2>
+            {message && (<div className={`p-3 rounded mb-4 text-sm ${message.includes('success') ? 'alert-success' : 'alert-error'}`}>{message}</div>)}
+            <form onSubmit={handleAuth}>
+              <div className="mb-4"><label>Email</label><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required placeholder="Enter your email" /></div>
+              <div className="mb-6"><label>Password</label><input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required placeholder="Enter your password" /></div>
+              <button type="submit" className="btn-primary w-full shadow-lg" disabled={loading}>{loading ? <span className="spinner"></span> : (isLogin ? 'Login' : 'Sign Up')}</button>
+            </form>
+            <p className="mt-6 text-center text-sm text-gray-500">
+              {isLogin ? "Don't have an account? " : "Already have an account? "}
+              <button type="button" className="text-[var(--green)] font-semibold hover:underline" onClick={() => { setIsLogin(!isLogin); setMessage(''); }}>
+                {isLogin ? 'Sign Up' : 'Login'}
+              </button>
+            </p>
+          </div>
+        </div>
+      );
+    }
+
+    function Dashboard({ session, onLogout }) {
+      const [activeTab, setActiveTab] = useState('soil');
+      return (
+        <div className="flex">
+          <div className="sidebar p-4 shadow-xl">
+            <h2 className="text-3xl font-bold mb-8 text-center text-white" style={{fontFamily: "'DM Serif Display', serif"}}>SoilIQ</h2>
+            <div className={`sidebar-link ${activeTab === 'soil' ? 'active' : ''}`} onClick={() => setActiveTab('soil')}>🌱 Soil Fertility</div>
+            <div className={`sidebar-link ${activeTab === 'disease' ? 'active' : ''}`} onClick={() => setActiveTab('disease')}>🍃 Crop Disease</div>
+            <div className={`sidebar-link ${activeTab === 'history' ? 'active' : ''}`} onClick={() => setActiveTab('history')}>📜 History</div>
+            <div className="mt-auto pt-4 border-t border-[rgba(255,255,255,0.2)]">
+              <p className="text-xs mb-2 truncate text-white/80">User: {session.user.email}</p>
+              <button onClick={onLogout} className="sidebar-link w-full text-left text-red-200 hover:bg-red-500/20 hover:text-white transition">🚪 Logout</button>
+            </div>
+          </div>
+          <div className="main-content w-full bg-[#f8faf8] lg:ml-64">
+            {activeTab === 'soil' && <SoilPrediction session={session} />}
+            {activeTab === 'disease' && <DiseaseDetection session={session} />}
+            {activeTab === 'history' && <HistoryView session={session} />}
+          </div>
+        </div>
+      );
+    }
+
+    function SoilPrediction({ session }) {
+      const [formData, setFormData] = useState({ ph: '', nitrogen: '', phosphorus: '', potassium: '', moisture: '', temperature: '' });
+      const [loading, setLoading] = useState(false);
+      const [result, setResult] = useState(null);
+
+      const handleSubmit = async (e) => {
+        e.preventDefault(); setLoading(true); setResult(null);
+        try {
+          const response = await fetch('/api/predict-soil', {
+            method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
+            body: JSON.stringify(formData)
+          });
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.error || 'Server error');
+          setResult(data);
+        } catch (err) { alert(err.message); } finally { setLoading(false); }
+      };
+
+      return (
+        <div className="max-w-3xl mx-auto pt-6">
+          <h2 className="text-4xl mb-6 text-[var(--green)]">Soil Fertility Prediction</h2>
+          <div className="card shadow-lg">
+            <form onSubmit={handleSubmit} className="grid grid-cols-2 gap-6">
+              <div><label>pH Level</label><input type="number" step="0.1" value={formData.ph} onChange={e => setFormData({...formData, ph: e.target.value})} placeholder="e.g. 6.5" required/></div>
+              <div><label>Nitrogen (N) mg/kg</label><input type="number" value={formData.nitrogen} onChange={e => setFormData({...formData, nitrogen: e.target.value})} placeholder="e.g. 80" required/></div>
+              <div><label>Phosphorus (P) mg/kg</label><input type="number" value={formData.phosphorus} onChange={e => setFormData({...formData, phosphorus: e.target.value})} placeholder="e.g. 40" required/></div>
+              <div><label>Potassium (K) mg/kg</label><input type="number" value={formData.potassium} onChange={e => setFormData({...formData, potassium: e.target.value})} placeholder="e.g. 40" required/></div>
+              <div><label>Moisture (%)</label><input type="number" step="0.1" value={formData.moisture} onChange={e => setFormData({...formData, moisture: e.target.value})} placeholder="e.g. 30" required/></div>
+              <div><label>Temperature (°C)</label><input type="number" step="0.1" value={formData.temperature} onChange={e => setFormData({...formData, temperature: e.target.value})} placeholder="e.g. 25" required/></div>
+              <div className="col-span-2 mt-4"><button type="submit" className="btn-primary w-full text-lg shadow-md" disabled={loading}>{loading ? <span className="spinner"></span> : 'Analyze Soil Data'}</button></div>
+            </form>
+            {result && (
+              <div className="mt-8 p-6 rounded-xl border-2 border-[var(--green-mid)] bg-[var(--green-pale)] shadow-sm">
+                <h3 className="text-2xl font-bold text-green-900 mb-2">Fertility Score: <span className="text-green-700">{result.prediction}</span></h3>
+                <p className="text-sm text-green-800">The prediction has been strictly recorded to your history.</p>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    function DiseaseDetection({ session }) {
+      const [file, setFile] = useState(null);
+      const [preview, setPreview] = useState(null);
+      const [loading, setLoading] = useState(false);
+      const [result, setResult] = useState(null);
+
+      const handleFileChange = (e) => {
+        const selected = e.target.files[0];
+        if (selected) { setFile(selected); setPreview(URL.createObjectURL(selected)); }
+      };
+
+      const handleSubmit = async (e) => {
+        e.preventDefault(); if (!file) return; setLoading(true); setResult(null);
+        const formData = new FormData(); formData.append('image', file);
+        try {
+          const response = await fetch('/api/predict-disease', { method: 'POST', headers: { 'Authorization': `Bearer ${session.access_token}` }, body: formData });
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.error || 'Server error');
+          setResult(data);
+        } catch (err) { alert(err.message); } finally { setLoading(false); }
+      };
+
+      return (
+        <div className="max-w-3xl mx-auto pt-6">
+          <h2 className="text-4xl mb-6 text-[var(--green)]">Crop Disease Scanner</h2>
+          <div className="card shadow-lg">
+            <form onSubmit={handleSubmit}>
+              <div className="border-2 border-dashed border-[var(--green-mid)] bg-gray-50 rounded-xl p-10 text-center mb-6 transition hover:bg-gray-100">
+                <input type="file" accept="image/*" onChange={handleFileChange} className="hidden" id="fileInput" />
+                <label htmlFor="fileInput" className="cursor-pointer text-gray-600 block w-full h-full">
+                  {preview ? (<img src={preview} alt="Preview" className="max-h-72 mx-auto rounded-lg shadow-md" />) : (
+                    <div className="py-10"><svg className="w-16 h-16 mx-auto mb-4 text-[var(--green-mid)]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4"></path></svg><span className="text-lg font-semibold">Click to upload a leaf image</span><p className="text-sm text-gray-500 mt-2">JPEG or PNG, max 5MB</p></div>
+                  )}
+                </label>
+              </div>
+              <button type="submit" className="btn-primary w-full text-lg shadow-md" disabled={!file || loading}>{loading ? <span className="spinner"></span> : 'Scan Leaf with AI'}</button>
+            </form>
+            {result && (
+              <div className="mt-8 p-6 rounded-xl border-2 border-blue-200 bg-blue-50 shadow-sm">
+                <h3 className="text-2xl font-bold text-blue-900 mb-2">Diagnosis: <span className="text-blue-700">{result.prediction}</span></h3>
+                <p className="font-semibold text-blue-800">Confidence: {(result.confidence * 100).toFixed(1)}%</p>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    function HistoryView({ session }) {
+      const [history, setHistory] = useState([]);
+      const [loading, setLoading] = useState(true);
+      const pieChartRef = useRef(null); const barChartRef = useRef(null);
+      const pieChartInstance = useRef(null); const barChartInstance = useRef(null);
+
+      useEffect(() => {
+        supabaseClient.from('soil_predictions').select('*').order('created_at', { ascending: false }).then(({ data }) => {
+          setHistory(data || []); setLoading(false);
+        });
+      }, []);
+
+      useEffect(() => {
+        if (loading || history.length === 0) return;
+        const counts = { High: 0, Medium: 0, Low: 0 };
+        let avgN = 0, avgP = 0, avgK = 0;
+        history.forEach(item => {
+          if (counts[item.fertility_result] !== undefined) counts[item.fertility_result]++;
+          avgN += parseFloat(item.nitrogen) || 0; avgP += parseFloat(item.phosphorus) || 0; avgK += parseFloat(item.potassium) || 0;
+        });
+        const total = history.length;
+        avgN = (avgN / total).toFixed(1); avgP = (avgP / total).toFixed(1); avgK = (avgK / total).toFixed(1);
+
+        if (pieChartInstance.current) pieChartInstance.current.destroy();
+        if (barChartInstance.current) barChartInstance.current.destroy();
+
+        if (pieChartRef.current) {
+          pieChartInstance.current = new Chart(pieChartRef.current, {
+            type: 'doughnut', data: { labels: ['High', 'Medium', 'Low'], datasets: [{ data: [counts.High, counts.Medium, counts.Low], backgroundColor: ['#40916c', '#f4d03f', '#e63946'], borderWidth: 0 }] },
+            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } }
+          });
+        }
+        if (barChartRef.current) {
+          barChartInstance.current = new Chart(barChartRef.current, {
+            type: 'bar', data: { labels: ['Nitrogen', 'Phosphorus', 'Potassium'], datasets: [{ label: 'Average (mg/kg)', data: [avgN, avgP, avgK], backgroundColor: ['#2d6a4f', '#52b788', '#b7e4c7'], borderRadius: 6 }] },
+            options: { responsive: true, maintainAspectRatio: false }
+          });
+        }
+      }, [history, loading]);
+
+      return (
+        <div className="max-w-5xl mx-auto pt-6">
+          <h2 className="text-4xl mb-6 text-[var(--green)]">Prediction History & Analytics</h2>
+          {!loading && history.length > 0 && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+              <div className="card shadow-lg flex flex-col items-center"><h3 className="text-xl font-bold mb-4 text-gray-700">Fertility Results</h3><div className="w-full h-64"><canvas ref={pieChartRef}></canvas></div></div>
+              <div className="card shadow-lg flex flex-col items-center"><h3 className="text-xl font-bold mb-4 text-gray-700">Average N-P-K Levels</h3><div className="w-full h-64"><canvas ref={barChartRef}></canvas></div></div>
+            </div>
+          )}
+          <div className="card overflow-x-auto shadow-lg p-0">
+            <table className="w-full text-left border-collapse">
+              <thead><tr className="bg-gray-100 border-b-2 border-gray-200 text-gray-700 uppercase text-xs tracking-wider"><th className="py-4 px-6 font-semibold">Date</th><th className="py-4 px-6 font-semibold">pH</th><th className="py-4 px-6 font-semibold">Moisture</th><th className="py-4 px-6 font-semibold">N-P-K</th><th className="py-4 px-6 font-semibold">Result</th></tr></thead>
+              <tbody className="bg-white">
+                {loading ? (<tr><td colSpan="5" className="py-10 text-center text-gray-500"><span className="spinner border-t-gray-500 border-gray-200"></span> Loading data...</td></tr>) : history.length === 0 ? (<tr><td colSpan="5" className="py-10 text-center text-gray-500 italic">No history found. Try making a prediction!</td></tr>) : (
+                  history.map((item) => (
+                    <tr key={item.id} className="border-b border-gray-100 hover:bg-gray-50 transition">
+                      <td className="py-3 px-6 whitespace-nowrap text-sm text-gray-600">{new Date(item.created_at).toLocaleString()}</td>
+                      <td className="py-3 px-6 whitespace-nowrap">{item.ph}</td><td className="py-3 px-6 whitespace-nowrap">{item.moisture}%</td><td className="py-3 px-6 whitespace-nowrap">{item.nitrogen}-{item.phosphorus}-{item.potassium}</td>
+                      <td className="py-3 px-6 whitespace-nowrap"><span className={`badge ${item.fertility_result === 'High' ? 'badge-high' : item.fertility_result === 'Medium' ? 'badge-medium' : 'badge-low'}`}>{item.fertility_result}</span></td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      );
+    }
+
+    function App() {
+      const [session, setSession] = useState(null);
+      const [loading, setLoading] = useState(true);
+
+      useEffect(() => {
+        supabaseClient.auth.getSession().then(({ data: { session } }) => { setSession(session); setLoading(false); });
+        const { data: { subscription } } = supabaseClient.auth.onAuthStateChange((_event, session) => { setSession(session); });
+        return () => subscription.unsubscribe();
+      }, []);
+
+      if (loading) return (<div className="flex justify-center items-center h-screen"><div className="spinner border-t-[var(--green)] border-[var(--green-pale)] w-12 h-12"></div></div>);
+
+      return (<div>{session ? (<Dashboard session={session} onLogout={() => supabaseClient.auth.signOut()} />) : (<Auth onLogin={setSession} />)}</div>);
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
 </body>
 </html>
